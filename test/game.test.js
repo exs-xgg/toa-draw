@@ -400,3 +400,66 @@ test('Christmas theme: every word choice includes a holiday word, and the page i
   const res = await fetch(`${url}/theme-config.js`);
   assert.equal(await res.text(), 'window.TOA_THEME="christmas";');
 });
+
+// ---------- Drawers per round ----------
+function drawersRoom(n, playerCount) {
+  const { Room } = require('../src/room');
+  const room = new Room({ to: () => ({ emit: () => {} }) }, 'DRAW1');
+  room.settings.drawersPerRound = n;
+  for (let i = 0; i < playerCount; i++) {
+    const id = `p${i}`;
+    room.players.set(id, { id, name: `P${i}`, score: 0, color: '#000000', guessed: false, chatTimes: [], voice: 'unknown' });
+  }
+  return room;
+}
+
+test('drawers per round: random picks, and nobody draws twice before everyone has drawn once', () => {
+  const room = drawersRoom(3, 7);
+  const seen = new Map();
+  for (let round = 1; round <= 3; round++) {
+    const picked = room.pickDrawers();
+    assert.equal(picked.length, 3);
+    assert.equal(new Set(picked).size, 3, 'no duplicates in a round');
+    picked.forEach((id) => room.drawCounts.set(id, (room.drawCounts.get(id) || 0) + 1));
+    picked.forEach((id) => seen.set(id, (seen.get(id) || 0) + 1));
+    if (round === 2) assert.equal(seen.size, 6, 'rounds 1-2 used 6 different players');
+  }
+  assert.equal(seen.size, 7, 'all 7 players drew within 3 rounds of 3');
+  assert.ok([...seen.values()].every((c) => c <= 2));
+
+  // Different games pick different drawers (randomised).
+  const firstPicks = new Set();
+  for (let i = 0; i < 30; i++) firstPicks.add(drawersRoom(3, 7).pickDrawers().slice().sort().join());
+  assert.ok(firstPicks.size > 1, 'selection is random');
+
+  // "Everyone" (0) and limits larger than the room let everyone draw.
+  assert.equal(drawersRoom(0, 5).pickDrawers().length, 5);
+  assert.equal(drawersRoom(10, 4).pickDrawers().length, 4);
+});
+
+test('drawers per round: setting validation and late joiners', () => {
+  const room = drawersRoom(0, 2);
+  room.hostId = 'p0';
+  room.updateSettings('p0', { drawersPerRound: 4 });
+  assert.equal(room.settings.drawersPerRound, 4);
+  room.updateSettings('p0', { drawersPerRound: 999 });
+  assert.equal(room.settings.drawersPerRound, 50);
+  room.updateSettings('p0', { drawersPerRound: 'abc' });
+  assert.equal(room.settings.drawersPerRound, 50, 'junk ignored');
+  room.updateSettings('p0', { drawersPerRound: 0 });
+  assert.equal(room.settings.drawersPerRound, 0, 'Everyone');
+  room.updateSettings('p1', { drawersPerRound: 3 });
+  assert.equal(room.settings.drawersPerRound, 0, 'non-host cannot change it');
+
+  // Mid-game joiner: queued only when everyone draws.
+  const fakeSocket = (id) => ({ id, join() {}, emit() {} });
+  room.settings.drawersPerRound = 2;
+  room.phase = 'drawing';
+  room.queue = [];
+  room.addPlayer(fakeSocket('late1'), 'Late');
+  assert.deepEqual(room.queue, [], 'limited: late joiner waits for a later round');
+  room.settings.drawersPerRound = 0;
+  room.addPlayer(fakeSocket('late2'), 'Later');
+  assert.deepEqual(room.queue, ['late2'], 'everyone: late joiner gets a turn this round');
+  room.clearTimers();
+});

@@ -40,6 +40,8 @@ const AVATAR_COLORS = [
 const DRAW_TIMES = [30, 45, 60]; // seconds; the only draw times hosts can pick
 const UNLIMITED = 0; // maxPlayers value meaning "no player cap"
 
+const EVERYONE = 0; // drawersPerRound value meaning "every player draws each round"
+
 const SETTING_LIMITS = {
   rounds: [1, 10],
   drawTime: [30, 60],
@@ -57,6 +59,7 @@ const DEFAULT_SETTINGS = {
   customWords: [],
   customOnly: false,
   chaos: false, // voice-only answers
+  drawersPerRound: 0, // 0 = everyone draws each round; N = N random drawers per round
 };
 
 const HEX = /^#[0-9a-f]{6}$/i;
@@ -195,6 +198,9 @@ class Room {
     this.turnGains = {};
     this.turnBoosted = new Set();
     this.guessOrder = 0;
+    this.drawCounts = new Map(); // id -> turns drawn this game
+    this.turnInRound = 0;
+    this.turnsThisRound = 0;
     this.amplify = false; // this turn is a TOA Amplify turn
     this.amplifyNext = false; // the next turn will be one
     this.usedWords = new Set();
@@ -257,7 +263,8 @@ class Room {
     if (!this.hostId) this.hostId = socket.id;
 
     // Late joiners still get a turn this round.
-    if (this.isPlaying()) this.queue.push(socket.id);
+    // With a drawer limit, they wait to be picked in a later round instead.
+    if (this.isPlaying() && this.settings.drawersPerRound === EVERYONE) this.queue.push(socket.id);
 
     this.system(`${name} joined the room.`);
     if (this.phase === PHASE.DRAWING) socket.emit('canvas:sync', this.ops);
@@ -327,6 +334,11 @@ class Room {
       if (key in input) s[key] = clampInt(input[key], SETTING_LIMITS[key], s[key]);
     }
     s.drawTime = DRAW_TIMES.reduce((best, t) => (Math.abs(t - s.drawTime) < Math.abs(best - s.drawTime) ? t : best));
+    if ('drawersPerRound' in input) {
+      const n = Math.round(Number(input.drawersPerRound));
+      // 0 = everyone draws each round; otherwise 1-50 randomly picked drawers.
+      s.drawersPerRound = n === EVERYONE ? EVERYONE : clampInt(n, [1, 50], s.drawersPerRound);
+    }
     if (wantsUnlimited) s.maxPlayers = UNLIMITED;
     // A cap can never go below the number of players already in the room.
     else if (s.maxPlayers !== UNLIMITED) s.maxPlayers = Math.max(s.maxPlayers, this.players.size);
@@ -366,6 +378,7 @@ class Room {
     this.ranking = null;
     this.amplify = false;
     this.amplifyNext = false;
+    this.drawCounts = new Map();
     this.system('Game started. Good luck!', 'success');
     this.nextRound();
   }
@@ -376,9 +389,27 @@ class Room {
       this.gameOver();
       return;
     }
-    this.queue = shuffle([...this.players.keys()]);
-    this.system(`Round ${this.round} of ${this.settings.rounds}`, 'info');
+    this.queue = this.pickDrawers();
+    this.turnsThisRound = this.queue.length;
+    this.turnInRound = 0;
+    const limited = this.settings.drawersPerRound !== EVERYONE && this.queue.length < this.players.size;
+    const names = this.queue.map((id) => this.players.get(id).name);
+    this.system(limited
+      ? `Round ${this.round} of ${this.settings.rounds}. Drawing this round: ${names.join(', ')}.`
+      : `Round ${this.round} of ${this.settings.rounds}`, 'info');
     this.nextTurn();
+  }
+
+  // Random drawer order for a round. With a drawer limit, players who have
+  // drawn the fewest times this game go first, so everyone gets a turn before
+  // anyone draws twice; ties are broken at random.
+  pickDrawers() {
+    const ids = shuffle([...this.players.keys()]);
+    const limit = this.settings.drawersPerRound;
+    if (limit === EVERYONE || limit >= ids.length) return ids;
+    const count = (id) => this.drawCounts.get(id) || 0;
+    const chosen = ids.sort((a, b) => count(a) - count(b)).slice(0, limit);
+    return shuffle(chosen);
   }
 
   nextTurn() {
@@ -412,6 +443,8 @@ class Room {
   startChoosing(drawerId) {
     this.phase = PHASE.CHOOSING;
     this.drawerId = drawerId;
+    this.drawCounts.set(drawerId, (this.drawCounts.get(drawerId) || 0) + 1);
+    this.turnInRound++;
     this.word = null;
     this.ops = [];
     this.turnGains = {};
@@ -713,6 +746,8 @@ class Room {
       settings: this.settingsFor(id),
       phase: this.phase,
       round: this.round,
+      turnInRound: this.turnInRound,
+      turnsThisRound: this.turnsThisRound,
       drawerId: this.drawerId,
       players: [...this.players.values()].map((p) => ({
         id: p.id, name: p.name, score: p.score, color: p.color, guessed: p.guessed, voice: p.voice || 'unknown',
@@ -733,4 +768,4 @@ class Room {
   }
 }
 
-module.exports = { Room, PHASE, THEME, UNLIMITED, AMPLIFY_SLOTS, AMPLIFY_MULTIPLIER, normalize, isClose, revealsWord, voiceMatches, cleanOp };
+module.exports = { Room, PHASE, THEME, UNLIMITED, EVERYONE, AMPLIFY_SLOTS, AMPLIFY_MULTIPLIER, normalize, isClose, revealsWord, voiceMatches, cleanOp };

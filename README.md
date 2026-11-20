@@ -10,7 +10,8 @@ A lightweight team game for remote socials and onboarding sessions. Runs as a si
 
 - Private rooms with a 5-character code and a shareable invite link (`/?r=CODE`).
 - Quick play: matches players into public rooms, which auto-start once two people are in.
-- Host controls: rounds, draw time, max players, word choices, letter hints, custom word list (optionally custom-only), remove player.
+- Host controls: rounds, drawers per round, draw time, max players (up to Unlimited), word choices, letter hints, custom word list (optionally custom-only), remove player.
+- Drawers per round: "Everyone" (each player draws once per round) or a fixed number picked at random each round, so big rooms still finish. Players who have drawn the fewest times go first, so nobody draws twice before everyone has drawn once. The lobby shows the resulting game length, the chat announces each round's drawers, and the top bar shows "Turn X of Y".
 - Drawing tools: 22 colours, 4 brush sizes, eraser, flood fill, undo (Ctrl+Z), clear. Works with mouse, touch and pen.
 - Guessing: case- and punctuation-insensitive matching, "is close!" hints for near misses, letter reveals as time runs down.
 - Players who guessed and the drawer keep chatting publicly. Any message containing the answer is shown only to players who know it.

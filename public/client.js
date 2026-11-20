@@ -13,6 +13,7 @@
   const SpeechRecognitionImpl = window.SpeechRecognition || window.webkitSpeechRecognition || null;
   const SETTING_OPTIONS = {
     rounds: [1, 2, 3, 4, 5, 6, 8, 10],
+    drawersPerRound: [0, 1, 2, 3, 4, 5, 6, 8, 10], // 0 = Everyone
     drawTime: [30, 45, 60],
     maxPlayers: [2, 3, 4, 5, 6, 8, 10, 12, 16, 0], // 0 = Unlimited
     wordCount: [1, 2, 3, 4, 5],
@@ -198,13 +199,16 @@
 
   // maxPlayers 0 means no cap.
   function optionLabel(key, value) {
-    return key === 'maxPlayers' && Number(value) === UNLIMITED_PLAYERS ? 'Unlimited' : String(value);
+    if (key === 'maxPlayers' && Number(value) === UNLIMITED_PLAYERS) return 'Unlimited';
+    if (key === 'drawersPerRound' && Number(value) === 0) return 'Everyone';
+    return String(value);
   }
 
   function sendSettings() {
     if (!isHost()) return;
     socket.emit('room:settings', {
       rounds: form.elements.rounds.value,
+      drawersPerRound: form.elements.drawersPerRound.value,
       drawTime: form.elements.drawTime.value,
       maxPlayers: form.elements.maxPlayers.value,
       wordCount: form.elements.wordCount.value,
@@ -263,6 +267,21 @@
     const enough = state.players.length >= 2;
     start.classList.toggle('hidden', !host);
     start.disabled = !enough;
+    // Game length: rounds x drawers per round (capped by how many players there are).
+    const playersNow = state.players.length;
+    const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+    const minutesFor = (t) => Math.max(1, Math.round((t * (s.drawTime + 15)) / 60));
+    if (s.drawersPerRound === 0) {
+      const turns = s.rounds * playersNow;
+      $('game-length').textContent = `Everyone draws once per round: ${plural(turns, 'turn')} with ${plural(playersNow, 'player')}, `
+        + `up to about ${minutesFor(turns)} min. Grows as people join.`;
+    } else {
+      const maxTurns = s.rounds * s.drawersPerRound;
+      const small = playersNow < s.drawersPerRound ? ` Fewer while there ${playersNow === 1 ? 'is' : 'are'} only ${plural(playersNow, 'player')}.` : '';
+      $('game-length').textContent = `${plural(s.drawersPerRound, 'random drawer')} per round: at most ${plural(maxTurns, 'turn')}, `
+        + `about ${minutesFor(maxTurns)} min, however many join.${small}`;
+    }
+
     const notReady = s.chaos ? state.players.filter((p) => p.voice !== 'ready') : [];
     let note;
     if (!enough) note = 'Waiting for at least one more player. Share the invite link.';
@@ -318,7 +337,9 @@
 
   // ---------- game ----------
   function renderGame() {
-    $('round-label').textContent = state.round ? `Round ${state.round} of ${state.settings.rounds}` : '';
+    $('round-label').textContent = state.round
+      ? `Round ${state.round} of ${state.settings.rounds}${state.turnsThisRound ? ` · Turn ${state.turnInRound} of ${state.turnsThisRound}` : ''}`
+      : '';
     renderPlayers($('game-players'), true);
     renderWord();
     renderOverlay();
