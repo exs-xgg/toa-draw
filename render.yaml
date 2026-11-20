@@ -1,0 +1,16 @@
+# Render Blueprint: https://render.com/docs/blueprint-spec
+# Game state lives in memory, so keep this service at ONE instance.
+services:
+  - type: web
+    name: toa-draw
+    runtime: node
+    plan: free
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
