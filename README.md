@@ -27,6 +27,7 @@ Turn on **Chaos mode** under "Create private room" (the host can also change it 
 - A spoken phrase counts if it contains the answer as whole words, so "is it a hot dog" and "hotdog" both match "hot dog". Wrong spoken guesses appear in chat with a VOICE tag.
 - Typed chat still works, but typed answers never count, and typed messages containing the answer are not shown to anyone.
 - Public rooms never use chaos mode.
+- **Lobby mic check:** when a player enters a chaos lobby, the page asks for microphone permission and briefly starts speech recognition. This catches both a blocked microphone and a blocked speech service (for example Edge on a managed device) before the game starts. Each player gets a "Your mic check" panel with a "Check again" button. The player list shows MIC OK, NO MIC or NO VOICE for everyone, and the host sees who has not passed. Players who fail can still draw and chat but cannot answer.
 
 ### TOA Amplify turns
 

@@ -363,3 +363,21 @@ test('TOA Amplify: not triggered by a partial turn or outside chaos mode', () =>
   assert.equal(normal.amplify, false);
   normal.clearTimers();
 });
+
+test('lobby mic check status is shared with the room', async () => {
+  const host = client();
+  const guest = client();
+  const { code } = await emit(host, 'room:create', { name: 'Host', chaos: true });
+  await emit(guest, 'room:join', { name: 'Guest', code });
+  const initial = await waitFor(host, (s) => s.players.length === 2);
+  assert.ok(initial.players.every((p) => p.voice === 'unknown'));
+
+  guest.emit('voice:status', 'blocked');
+  await waitFor(host, (s) => s.players.some((p) => p.id === guest.id && p.voice === 'blocked'));
+  guest.emit('voice:status', 'ready');
+  await waitFor(host, (s) => s.players.some((p) => p.id === guest.id && p.voice === 'ready'));
+
+  guest.emit('voice:status', '<script>');
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(host.states.at(-1).players.find((p) => p.id === guest.id).voice, 'ready', 'unknown values ignored');
+});

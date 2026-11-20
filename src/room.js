@@ -24,6 +24,7 @@ const CHAT_MAX_IN_WINDOW = 6;
 const DRAWER_POINTS_PER_GUESS = 60;
 // TOA Amplify (chaos mode): after a turn everyone guessed, the first
 // AMPLIFY_SLOTS correct guessers next turn score AMPLIFY_MULTIPLIER x points.
+const VOICE_STATUSES = ['unknown', 'checking', 'ready', 'blocked', 'unsupported'];
 const AMPLIFY_SLOTS = 3;
 const AMPLIFY_MULTIPLIER = 2;
 
@@ -245,6 +246,7 @@ class Room {
       color: AVATAR_COLORS[this.colorIndex++ % AVATAR_COLORS.length],
       guessed: false,
       chatTimes: [],
+      voice: 'unknown', // lobby mic check result, see setVoiceStatus
     };
     this.players.set(socket.id, player);
     socket.join(this.code);
@@ -554,6 +556,15 @@ class Room {
 
   // ---------- chat & guessing ----------
 
+  // A player's own report of their lobby mic check, shown to everyone so the
+  // host can see who is ready to answer by voice before starting.
+  setVoiceStatus(id, status) {
+    const p = this.players.get(id);
+    if (!p || !VOICE_STATUSES.includes(status) || p.voice === status) return;
+    p.voice = status;
+    this.broadcastState();
+  }
+
   // Returns the player if they may send a message now, otherwise null.
   allowMessage(socket) {
     const p = this.players.get(socket.id);
@@ -692,7 +703,7 @@ class Room {
       round: this.round,
       drawerId: this.drawerId,
       players: [...this.players.values()].map((p) => ({
-        id: p.id, name: p.name, score: p.score, color: p.color, guessed: p.guessed,
+        id: p.id, name: p.name, score: p.score, color: p.color, guessed: p.guessed, voice: p.voice || 'unknown',
       })),
       hint: this.phase === PHASE.DRAWING ? this.maskedWord() : null,
       word: canSeeWord ? this.word : null,

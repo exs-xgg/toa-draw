@@ -178,6 +178,7 @@
     micOn = false;
     stopListening();
     voiceStatus('');
+    resetMicCheck();
     socket.emit('room:leave');
     state = null;
     lastCode = null;
@@ -256,16 +257,20 @@
       ? String(state.players.length)
       : `${state.players.length}/${s.maxPlayers}`;
     renderPlayers($('lobby-players'), false);
+    renderMicCheck();
 
     const start = $('btn-start');
     const enough = state.players.length >= 2;
     start.classList.toggle('hidden', !host);
     start.disabled = !enough;
+    const notReady = s.chaos ? state.players.filter((p) => p.voice !== 'ready') : [];
     let note;
     if (!enough) note = 'Waiting for at least one more player. Share the invite link.';
     else if (state.isPublic && state.timeLeft > 0) note = 'Public room: the game starts automatically in a few seconds.';
     else if (!host) note = `Waiting for ${playerName(state.hostId)} to start the game.`;
-    else note = 'Ready when you are.';
+    else if (notReady.length) {
+      note = `Mic check not passed yet: ${notReady.map((p) => p.name).join(', ')}. They can draw and chat, but cannot answer.`;
+    } else note = s.chaos ? 'Everyone passed the mic check. Ready when you are.' : 'Ready when you are.';
     $('lobby-note').textContent = note;
   }
 
@@ -293,6 +298,7 @@
         p.id === state.hostId && el('span', { class: 'badge host' }, 'HOST'),
         isDrawer && el('span', { class: 'badge draw' }, 'DRAWING'),
         p.guessed && el('span', { class: 'badge' }, 'GUESSED'),
+        !ranked && state.settings.chaos && micBadge(p.voice),
       );
       const kick = isHost() && p.id !== state.you && el('button', {
         class: 'kick', title: `Remove ${p.name}`, 'aria-label': `Remove ${p.name}`,
@@ -644,6 +650,134 @@
       $('btn-mic').click();
     }
   });
+
+  // ---------- lobby mic check (chaos mode) ----------
+  // Runs once when a player lands in a chaos lobby: asks for microphone
+  // permission, then briefly starts speech recognition, which is the step that
+  // fails on browsers whose speech service is blocked. The result is shared so
+  // the host can see who is ready before starting.
+  const MIC_LABELS = {
+    unknown: ['MIC ?', 'mic-unknown'],
+    checking: ['CHECKING MIC', 'mic-checking'],
+    ready: ['MIC OK', 'mic-ok'],
+    blocked: ['NO MIC', 'mic-bad'],
+    unsupported: ['NO VOICE', 'mic-bad'],
+  };
+  const micCheck = { status: 'unknown', text: '', ranFor: null };
+
+  function micBadge(status) {
+    const [label, cls] = MIC_LABELS[status] || MIC_LABELS.unknown;
+    return el('span', { class: `badge ${cls}`, title: 'Voice answer check' }, label);
+  }
+
+  function setMicCheck(status, text) {
+    micCheck.status = status;
+    micCheck.text = text;
+    socket.emit('voice:status', status);
+    renderMicCheck();
+  }
+
+  function resetMicCheck() {
+    micCheck.status = 'unknown';
+    micCheck.text = '';
+    micCheck.ranFor = null;
+  }
+
+  function renderMicCheck() {
+    const box = $('mic-check');
+    const show = Boolean(state && state.phase === 'lobby' && state.settings.chaos);
+    box.classList.toggle('hidden', !show);
+    if (!show) return;
+    // Run automatically the first time this player sees a chaos lobby for this room.
+    if (micCheck.ranFor !== state.code) {
+      micCheck.ranFor = state.code;
+      runMicCheck();
+      return;
+    }
+    const [label, cls] = MIC_LABELS[micCheck.status] || MIC_LABELS.unknown;
+    const pill = $('mic-check-pill');
+    pill.textContent = label;
+    pill.className = `mic-pill ${cls}`;
+    $('mic-check-text').textContent = micCheck.text;
+    box.dataset.status = micCheck.status;
+    $('btn-mic-check').disabled = micCheck.status === 'checking';
+  }
+
+  async function runMicCheck() {
+    if (micCheck.status === 'checking') return;
+    if (!SpeechRecognitionImpl) {
+      setMicCheck('unsupported', 'This browser has no voice input, so you cannot answer in chaos mode. Switch to Chrome.');
+      return;
+    }
+    setMicCheck('checking', 'Asking for microphone access... allow it if your browser asks.');
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setMicCheck('blocked', 'This page cannot use the microphone. It must be opened over HTTPS (or localhost).');
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((t) => t.stop());
+    } catch (err) {
+      const name = err && err.name;
+      setMicCheck('blocked', name === 'NotFoundError' || name === 'OverconstrainedError'
+        ? 'No microphone was found. Plug one in, then check again.'
+        : 'Microphone access is blocked. Click the icon at the left of the address bar, allow the microphone, then check again.');
+      return;
+    }
+    setMicCheck('checking', 'Microphone allowed. Testing speech recognition... say something!');
+    const result = await testSpeechService();
+    if (result.ok) {
+      setMicCheck('ready', result.heard
+        ? `You're ready. Heard: "${result.heard}"`
+        : "You're ready. Microphone and speech recognition both work.");
+    } else {
+      setMicCheck('blocked', await explainVoiceError(result.code));
+    }
+  }
+
+  // Starts recognition for a few seconds. Success = it starts without an error.
+  function testSpeechService() {
+    return new Promise((resolve) => {
+      const r = new SpeechRecognitionImpl();
+      r.lang = SPEECH_LANG;
+      r.continuous = false;
+      r.interimResults = true;
+      let started = false;
+      let done = false;
+      let heard = '';
+      const timers = [];
+      const finish = (res) => {
+        if (done) return;
+        done = true;
+        timers.forEach(clearTimeout);
+        try { r.abort(); } catch { /* ignore */ }
+        resolve(res);
+      };
+      r.onstart = () => { started = true; };
+      r.onresult = (event) => {
+        heard = [...event.results].map((res) => res[0].transcript).join(' ').trim();
+        if (heard) setMicCheck('checking', `Listening... "${heard}"`);
+        if (event.results[event.results.length - 1].isFinal) finish({ ok: true, heard });
+      };
+      r.onerror = (event) => {
+        if (event.error === 'no-speech' || event.error === 'aborted') {
+          if (started) finish({ ok: true, heard });
+          return;
+        }
+        finish({ ok: false, code: event.error });
+      };
+      r.onend = () => finish(started ? { ok: true, heard } : { ok: false, code: 'stalled' });
+      timers.push(setTimeout(() => { if (!started) finish({ ok: false, code: 'stalled' }); }, 5000));
+      timers.push(setTimeout(() => finish({ ok: started, heard, code: 'stalled' }), 6000));
+      try {
+        r.start();
+      } catch (err) {
+        finish({ ok: false, code: (err && err.name) || 'start-failed' });
+      }
+    });
+  }
+
+  $('btn-mic-check').addEventListener('click', runMicCheck);
 
   // ---------- chat ----------
   function addMessage(m) {
