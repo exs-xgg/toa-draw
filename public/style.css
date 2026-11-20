@@ -308,3 +308,69 @@ canvas.can-draw { cursor: crosshair; }
   .podium .step { width: 80px; }
 }
 .hidden-words { margin: 0; padding: 9px 11px; border-radius: 10px; border: 1px dashed var(--border); background: var(--surface-2); color: var(--muted); font-weight: 400; }
+
+/* Final standings under the podium */
+.standings {
+  position: relative; list-style: none; margin: 4px 0 0; padding: 0; width: min(360px, 100%); flex: none;
+  max-height: 34%; overflow-y: auto; border-top: 1px solid rgba(255, 255, 255, .18);
+}
+.standings li {
+  display: grid; grid-template-columns: 2.6em 24px minmax(0, 1fr) auto; align-items: center; gap: 8px;
+  padding: 4px 6px; border-bottom: 1px solid rgba(255, 255, 255, .12); text-align: left;
+}
+.standings li.me { background: rgba(255, 255, 255, .14); border-radius: 6px; }
+.standings .pos { font-weight: 800; color: #cbd2e4; text-align: right; }
+.standings .avatar { width: 24px; height: 24px; font-size: .7rem; }
+.standings .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.standings .pts { font-weight: 700; color: #a5f3c4; }
+@media (max-width: 720px) {
+  .podium .block { font-size: 1.1rem; }
+  .podium .p1 .block { height: 70px; }
+  .podium .p2 .block { height: 50px; }
+  .podium .p3 .block { height: 38px; }
+  .standings { max-height: 30%; font-size: .85rem; }
+}
+/* Let tall overlay content (podium + standings) scroll instead of clipping. */
+.overlay { overflow-y: auto; justify-content: safe center; }
+/* Game-over layout: compact podium, standings fill the rest and scroll. */
+.overlay.final { justify-content: flex-start; gap: 8px; padding: 14px; overflow: hidden; }
+.overlay.final h3 { font-size: 1.2rem; }
+.overlay.final .podium { flex: none; }
+.overlay.final .podium .step { width: 96px; gap: 2px; font-size: .85rem; }
+.overlay.final .podium .avatar { width: 30px; height: 30px; font-size: .85rem; }
+.overlay.final .podium .block { font-size: 1.1rem; }
+.overlay.final .podium .p1 .block { height: 56px; }
+.overlay.final .podium .p2 .block { height: 40px; }
+.overlay.final .podium .p3 .block { height: 30px; }
+.overlay.final .standings { flex: 1 1 auto; min-height: 48px; max-height: none; margin: 0; }
+.overlay.final > p { flex: none; margin: 0; }
+@media (max-width: 720px) {
+  .overlay.final { padding: 10px; gap: 6px; }
+  .overlay.final h3 { font-size: 1rem; }
+  .overlay.final > p { display: none; }
+  .overlay.final .podium .step { width: 84px; gap: 0; font-size: .78rem; }
+  .overlay.final .podium .avatar { width: 26px; height: 26px; font-size: .75rem; }
+  .overlay.final .podium .p1 .block,
+  .overlay.final .podium .p2 .block,
+  .overlay.final .podium .p3 .block { height: 18px; font-size: .8rem; margin-top: 2px; }
+  .overlay.final .standings li { padding: 3px 6px; }
+}
+
+/* TOA Amplify (chaos mode bonus turn) */
+:root { --amp: #d97706; --amp-soft: #fef3c7; }
+@media (prefers-color-scheme: dark) { :root { --amp: #fbbf24; --amp-soft: #3a2a07; } }
+.amplify-badge {
+  font-size: .68rem; font-weight: 800; letter-spacing: .08em; padding: 2px 8px; border-radius: 6px;
+  background: linear-gradient(90deg, #f59e0b, #ef4444); color: #fff; white-space: nowrap;
+}
+.canvas-wrap.amplify { border-color: #f59e0b; box-shadow: 0 0 0 3px rgba(245, 158, 11, .55), var(--shadow); }
+.amplify-banner {
+  display: flex; flex-direction: column; gap: 2px; padding: 8px 14px; border-radius: 10px;
+  background: linear-gradient(90deg, #f59e0b, #ef4444); color: #fff; font-size: .85rem;
+}
+.amplify-banner strong { font-size: 1rem; letter-spacing: .04em; text-transform: uppercase; }
+.boost-tag {
+  margin-left: 6px; font-size: .65rem; font-weight: 800; padding: 1px 5px; border-radius: 5px;
+  background: #f59e0b; color: #fff; vertical-align: 1px;
+}
+.msg.msg-amplify { color: var(--amp); background: var(--amp-soft); font-weight: 700; }

@@ -249,7 +249,7 @@
     chaosNote.classList.toggle('hidden', !s.chaos);
     chaosNote.textContent = !SpeechRecognitionImpl
       ? 'Chaos mode is on, but this browser has no voice input. Switch to Chrome to answer.'
-      : 'Chaos mode is on: guesses only count when you say them. Your browser will ask for microphone access. Chrome and Edge send speech to their online speech service to turn it into text.';
+      : 'Chaos mode is on: guesses only count when you say them. If everyone gets a drawing, the next one is a TOA Amplify turn (first 3 correct guesses score 2x). Your browser will ask for microphone access. Chrome and Edge send speech to their online speech service to turn it into text.';
 
     $('room-code').textContent = state.code;
     $('lobby-count').textContent = s.maxPlayers === UNLIMITED_PLAYERS
@@ -283,6 +283,9 @@
   // ---------- players ----------
   function renderPlayers(list, ranked) {
     const players = ranked ? [...state.players].sort((a, b) => b.score - a.score) : state.players;
+    // Equal scores share a rank (1, 2, 2, 4), matching the final standings.
+    const ranks = [];
+    players.forEach((p, i) => { ranks[i] = i > 0 && p.score === players[i - 1].score ? ranks[i - 1] : i + 1; });
     list.replaceChildren(...players.map((p, i) => {
       const isDrawer = p.id === state.drawerId && (state.phase === 'drawing' || state.phase === 'choosing');
       const cls = ['player', p.id === state.you && 'me', p.guessed && 'guessed', isDrawer && 'drawing'].filter(Boolean).join(' ');
@@ -297,7 +300,7 @@
       }, '×');
       // In the narrow in-game list, badges sit under the name so it is not squeezed.
       return el('li', { class: cls },
-        el('span', { class: 'rank' }, ranked ? `#${i + 1}` : ''),
+        el('span', { class: 'rank' }, ranked ? `#${ranks[i]}` : ''),
         el('span', { class: 'avatar', style: `background:${p.color}` }, p.name.charAt(0)),
         el('div', { class: 'info' },
           el('div', { class: 'pname' }, p.name, p.id === state.you ? ' (you)' : ''),
@@ -323,6 +326,12 @@
     const self = me();
     const chaos = state.settings.chaos;
     $('chaos-badge').classList.toggle('hidden', !chaos);
+    const amp = $('amplify-badge');
+    amp.classList.toggle('hidden', !state.amplify);
+    amp.textContent = state.phase === 'drawing'
+      ? `TOA AMPLIFY 2x · ${state.amplifySlotsLeft} left`
+      : 'TOA AMPLIFY 2x';
+    $('canvas').parentElement.classList.toggle('amplify', Boolean(state.amplify));
     if (state.phase === 'drawing' && (state.drawerId === state.you || (self && self.guessed))) {
       input.placeholder = 'Chat (anything with the answer stays hidden)...';
     } else if (chaos) {
@@ -364,18 +373,23 @@
   function renderOverlay() {
     const o = $('overlay');
     const phase = state.phase;
+    o.classList.toggle('final', phase === 'gameOver');
     if (phase === 'drawing') { o.classList.add('hidden'); return; }
     o.classList.remove('hidden');
 
+    const amplifyBanner = state.amplify && el('div', { class: 'amplify-banner' },
+      el('strong', {}, 'TOA Amplify turn'),
+      el('span', {}, 'The first 3 correct guesses score 2x points'));
     if (phase === 'choosing') {
       if (state.choices) {
         o.replaceChildren(
+          amplifyBanner,
           el('h3', {}, 'Choose a word to draw'),
           el('div', { class: 'choices' }, state.choices.map((w, i) =>
             el('button', { class: 'btn', onclick: () => socket.emit('word:choose', i) }, w))),
         );
       } else {
-        o.replaceChildren(el('h3', {}, `${playerName(state.drawerId)} is choosing a word...`));
+        o.replaceChildren(amplifyBanner, el('h3', {}, `${playerName(state.drawerId)} is choosing a word...`));
       }
     } else if (phase === 'turnEnd' && state.result) {
       const r = state.result;
@@ -385,22 +399,40 @@
         el('h3', {}, title),
         r.word ? el('div', {}, 'The word was ', el('div', { class: 'big-word' }, r.word)) : null,
         el('ul', { class: 'gains' }, r.gains.map((g) =>
-          el('li', {}, el('span', {}, g.name), el('span', { class: g.gain ? 'plus' : 'zero' }, g.gain ? `+${g.gain}` : '0')))),
+          el('li', {},
+            el('span', {}, g.name, g.boosted && el('span', { class: 'boost-tag', title: 'TOA Amplify' }, '2x')),
+            el('span', { class: g.gain ? 'plus' : 'zero' }, g.gain ? `+${g.gain}` : '0')))),
+        r.amplifyNext && el('div', { class: 'amplify-banner' },
+          el('strong', {}, 'Next turn: TOA Amplify'),
+          el('span', {}, 'First 3 correct guesses score 2x')),
       );
     } else if (phase === 'gameOver' && state.ranking) {
-      const top = state.ranking.slice(0, 3);
+      const ranking = state.ranking;
+      const top = ranking.slice(0, 3);
       const order = [top[1], top[0], top[2]];
       const cls = ['p2', 'p1', 'p3'];
-      const medal = ['2', '1', '3'];
+      const rankOf = (p, fallback) => String(p.rank || fallback);
+      const fallbackRank = [2, 1, 3];
+      // Full standings for every participant, not just the podium.
+      const standings = el('ol', { class: 'standings', 'aria-label': 'Final standings' }, ranking.map((p, i) =>
+        el('li', { class: p.id === state.you ? 'me' : '' },
+          el('span', { class: 'pos' }, `#${p.rank || i + 1}`),
+          el('span', { class: 'avatar', style: `background:${p.color}` }, p.name.charAt(0)),
+          el('span', { class: 'nm' }, p.name, p.id === state.you ? ' (you)' : ''),
+          el('span', { class: 'pts' }, `${p.score} pts`))));
       o.replaceChildren(
         el('h3', {}, 'Final results'),
         el('div', { class: 'podium' }, order.map((p, i) => p && el('div', { class: `step ${cls[i]}` },
           el('span', { class: 'avatar', style: `background:${p.color}` }, p.name.charAt(0)),
           el('div', { class: 'nm' }, p.name),
           el('div', {}, `${p.score} pts`),
-          el('div', { class: 'block' }, medal[i])))),
+          el('div', { class: 'block' }, rankOf(p, fallbackRank[i]))))),
+        standings,
         el('p', { class: 'small' }, 'Returning to the lobby shortly...'),
       );
+      // Keep your own row in view in a long list.
+      const mine = standings.querySelector('li.me');
+      if (mine) standings.scrollTop = Math.max(0, mine.offsetTop - standings.clientHeight / 2);
     } else {
       o.classList.add('hidden');
     }

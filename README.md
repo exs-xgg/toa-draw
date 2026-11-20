@@ -28,6 +28,10 @@ Turn on **Chaos mode** under "Create private room" (the host can also change it 
 - Typed chat still works, but typed answers never count, and typed messages containing the answer are not shown to anyone.
 - Public rooms never use chaos mode.
 
+### TOA Amplify turns
+
+Chaos rooms also get TOA Amplify turns. If every guesser gets a drawing, the next drawing is a TOA Amplify turn: the first 3 correct guesses score 2x points. The drawer's points are not doubled. Amplify turns can chain: if everyone also gets the Amplify drawing, the next one is Amplify too. Players see an Amplify badge with the number of 2x slots left, a gold board border, chat announcements, and "2x" tags in the turn summary.
+
 Requirements and caveats:
 
 - Uses the browser's Web Speech API. Chrome is the tested browser. Edge has the API, but on managed (company) devices its online speech service is often blocked and it shows a "speech service refused to start" error. Firefox has no support. Players without voice can still draw and chat but cannot answer.

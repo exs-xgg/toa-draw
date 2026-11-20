@@ -276,3 +276,90 @@ test('quick play puts players in the same public room', async () => {
   assert.equal(s.isPublic, true);
   assert.ok(s.timeLeft > 0, 'auto-start countdown running');
 });
+
+test('final ranking lists every player, with ties sharing a rank', () => {
+  const { Room } = require('../src/room');
+  const sent = [];
+  const fakeIo = { to: () => ({ emit: (event, payload) => sent.push([event, payload]) }) };
+  const room = new Room(fakeIo, 'TEST1');
+  const scores = { a: 300, b: 500, c: 300, d: 100, e: 0 };
+  for (const [id, score] of Object.entries(scores)) {
+    room.players.set(id, { id, name: id.toUpperCase(), score, color: '#000000', guessed: false, chatTimes: [] });
+  }
+  room.gameOver();
+  room.clearTimers();
+
+  const ranking = room.stateFor('d').ranking;
+  assert.equal(ranking.length, 5, 'all participants are included');
+  assert.deepEqual(ranking.map((p) => [p.name, p.score, p.rank]), [
+    ['B', 500, 1], ['A', 300, 2], ['C', 300, 2], ['D', 100, 4], ['E', 0, 5],
+  ]);
+});
+
+// ---------- TOA Amplify ----------
+function amplifyRoom({ chaos }) {
+  const { Room } = require('../src/room');
+  const fakeIo = { to: () => ({ emit: () => {} }) };
+  const room = new Room(fakeIo, 'AMP01');
+  room.settings.chaos = chaos;
+  for (const id of ['a', 'b', 'c', 'd', 'e']) {
+    room.players.set(id, { id, name: id.toUpperCase(), score: 0, color: '#000000', guessed: false, chatTimes: [] });
+  }
+  room.round = 1;
+  room.queue = ['a', 'b'];
+  return room;
+}
+const guess = (room, ids) => ids.forEach((id) => room.correctGuess(room.players.get(id)));
+const near = (actual, expected) => assert.ok(Math.abs(actual - expected) <= 4, `${actual} ~ ${expected}`);
+
+test('TOA Amplify: everyone guessing earns a 2x turn for the first three guessers', () => {
+  const room = amplifyRoom({ chaos: true });
+  room.nextTurn();
+  room.chooseWord('a', 0);
+  assert.equal(room.stateFor('b').amplify, false, 'first turn is not amplified');
+  guess(room, ['b', 'c', 'd', 'e']);
+  assert.equal(room.phase, 'turnEnd');
+  assert.equal(room.lastResult.reason, 'allGuessed');
+  assert.equal(room.lastResult.amplifyNext, true, 'next turn announced as Amplify');
+
+  room.clearTimers();
+  room.nextTurn(); // B draws
+  assert.equal(room.stateFor('c').amplify, true, 'players are told this is an Amplify turn');
+  room.chooseWord('b', 0);
+  assert.equal(room.stateFor('c').amplifySlotsLeft, 3);
+  guess(room, ['c', 'd', 'e', 'a']);
+  room.clearTimers();
+
+  // Instant guesses score 500, 475, 450, 425 before the multiplier.
+  const gains = Object.fromEntries(room.lastResult.gains.map((g) => [g.id, g]));
+  near(gains.c.gain, 1000);
+  near(gains.d.gain, 950);
+  near(gains.e.gain, 900);
+  near(gains.a.gain, 425);
+  assert.deepEqual(['c', 'd', 'e', 'a'].map((id) => gains[id].boosted), [true, true, true, false]);
+  assert.equal(gains.b.gain, 4 * 60, 'drawer points are not doubled');
+  assert.equal(room.lastResult.amplified, true);
+});
+
+test('TOA Amplify: not triggered by a partial turn or outside chaos mode', () => {
+  const partial = amplifyRoom({ chaos: true });
+  partial.nextTurn();
+  partial.chooseWord('a', 0);
+  guess(partial, ['b', 'c']);
+  partial.endTurn(); // time runs out
+  partial.clearTimers();
+  assert.equal(partial.lastResult.amplifyNext, false);
+  partial.nextTurn();
+  assert.equal(partial.amplify, false);
+  partial.clearTimers();
+
+  const normal = amplifyRoom({ chaos: false });
+  normal.nextTurn();
+  normal.chooseWord('a', 0);
+  guess(normal, ['b', 'c', 'd', 'e']);
+  normal.clearTimers();
+  assert.equal(normal.lastResult.amplifyNext, false, 'no Amplify without chaos mode');
+  normal.nextTurn();
+  assert.equal(normal.amplify, false);
+  normal.clearTimers();
+});

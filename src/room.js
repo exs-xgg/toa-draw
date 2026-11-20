@@ -22,6 +22,10 @@ const MAX_OPS_PER_BATCH = 500;
 const CHAT_WINDOW_MS = 3000;
 const CHAT_MAX_IN_WINDOW = 6;
 const DRAWER_POINTS_PER_GUESS = 60;
+// TOA Amplify (chaos mode): after a turn everyone guessed, the first
+// AMPLIFY_SLOTS correct guessers next turn score AMPLIFY_MULTIPLIER x points.
+const AMPLIFY_SLOTS = 3;
+const AMPLIFY_MULTIPLIER = 2;
 
 const AVATAR_COLORS = [
   '#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6',
@@ -184,7 +188,10 @@ class Room {
     this.hintTimes = [];
     this.phaseEndsAt = 0;
     this.turnGains = {};
+    this.turnBoosted = new Set();
     this.guessOrder = 0;
+    this.amplify = false; // this turn is a TOA Amplify turn
+    this.amplifyNext = false; // the next turn will be one
     this.usedWords = new Set();
     this.lastResult = null;
     this.ranking = null;
@@ -351,6 +358,8 @@ class Room {
     this.round = 0;
     this.usedWords.clear();
     this.ranking = null;
+    this.amplify = false;
+    this.amplifyNext = false;
     this.system('Game started. Good luck!', 'success');
     this.nextRound();
   }
@@ -392,10 +401,17 @@ class Room {
     this.word = null;
     this.ops = [];
     this.turnGains = {};
+    this.turnBoosted = new Set();
     this.guessOrder = 0;
     this.revealed = new Set();
     this.lastResult = null;
     for (const p of this.players.values()) p.guessed = false;
+    // TOA Amplify (chaos mode only): earned by a turn everyone guessed.
+    this.amplify = Boolean(this.settings.chaos && this.amplifyNext);
+    this.amplifyNext = false;
+    if (this.amplify) {
+      this.system(`TOA Amplify turn! The first ${AMPLIFY_SLOTS} correct guesses score ${AMPLIFY_MULTIPLIER}x points.`, 'amplify');
+    }
     this.choices = this.pickChoices();
     this.emitAll('canvas:sync', []);
     this.schedule(TIMING.choose, () => this.chooseWord(drawerId, Math.floor(Math.random() * this.choices.length)));
@@ -457,15 +473,23 @@ class Room {
     this.clearTimers();
     const drawer = this.players.get(this.drawerId);
     const allGuessed = this.phase === PHASE.DRAWING && this.everyoneGuessed();
+    const finalReason = reason === 'drawerLeft' ? 'drawerLeft' : allGuessed ? 'allGuessed' : 'time';
+    // Everyone guessed this turn in a chaos room: the next turn is a TOA Amplify turn.
+    this.amplifyNext = Boolean(this.settings.chaos && finalReason === 'allGuessed');
     this.lastResult = {
       word: this.word,
       drawerName: drawer ? drawer.name : 'The drawer',
-      reason: reason === 'drawerLeft' ? 'drawerLeft' : allGuessed ? 'allGuessed' : 'time',
+      reason: finalReason,
+      amplified: this.amplify,
+      amplifyNext: this.amplifyNext,
       gains: [...this.players.values()]
-        .map((p) => ({ id: p.id, name: p.name, color: p.color, gain: this.turnGains[p.id] || 0 }))
+        .map((p) => ({
+          id: p.id, name: p.name, color: p.color, gain: this.turnGains[p.id] || 0, boosted: this.turnBoosted.has(p.id),
+        }))
         .sort((a, b) => b.gain - a.gain),
     };
     if (this.word) this.system(`The word was "${this.word}".`, 'info');
+    if (this.amplifyNext) this.system('Everyone got it! Next turn is a TOA Amplify turn.', 'amplify');
     this.phase = PHASE.TURN_END;
     this.schedule(TIMING.turnEnd, () => this.nextTurn());
     this.broadcastState();
@@ -476,9 +500,12 @@ class Room {
     this.phase = PHASE.GAME_OVER;
     this.drawerId = null;
     this.word = null;
+    // Standard competition ranking: equal scores share a rank (1, 1, 3, ...).
     this.ranking = [...this.players.values()]
       .map((p) => ({ id: p.id, name: p.name, color: p.color, score: p.score }))
-      .sort((a, b) => b.score - a.score);
+      .sort((a, b) => b.score - a.score)
+      .map((p, i, list) => ({ ...p, rank: i > 0 && p.score === list[i - 1].score ? null : i + 1 }));
+    this.ranking.forEach((p, i) => { if (p.rank === null) p.rank = this.ranking[i - 1].rank; });
     if (this.ranking[0]) this.system(`${this.ranking[0].name} wins with ${this.ranking[0].score} points!`, 'success');
     this.schedule(TIMING.gameOver, () => this.toLobby());
     this.broadcastState();
@@ -494,6 +521,8 @@ class Room {
     this.word = null;
     this.ops = [];
     this.lastResult = null;
+    this.amplify = false;
+    this.amplifyNext = false;
     for (const p of this.players.values()) p.guessed = false;
     this.emitAll('canvas:sync', []);
     this.maybeAutoStart();
@@ -615,7 +644,12 @@ class Room {
     player.guessed = true;
     const total = this.settings.drawTime * 1000;
     const remaining = Math.max(0, this.phaseEndsAt - Date.now()) / total;
-    const points = Math.round(50 + 350 * remaining) + Math.max(0, 100 - 25 * this.guessOrder);
+    let points = Math.round(50 + 350 * remaining) + Math.max(0, 100 - 25 * this.guessOrder);
+    const boosted = this.amplify && this.guessOrder < AMPLIFY_SLOTS;
+    if (boosted) {
+      points *= AMPLIFY_MULTIPLIER;
+      this.turnBoosted.add(player.id);
+    }
     this.guessOrder++;
     player.score += points;
     this.turnGains[player.id] = (this.turnGains[player.id] || 0) + points;
@@ -625,7 +659,9 @@ class Room {
       drawer.score += DRAWER_POINTS_PER_GUESS;
       this.turnGains[drawer.id] = (this.turnGains[drawer.id] || 0) + DRAWER_POINTS_PER_GUESS;
     }
-    this.system(`${player.name} guessed the word!`, 'success');
+    this.system(boosted
+      ? `${player.name} guessed the word! TOA Amplify ${AMPLIFY_MULTIPLIER}x: +${points}`
+      : `${player.name} guessed the word!`, boosted ? 'amplify' : 'success');
     if (this.everyoneGuessed()) this.endTurn();
     else this.broadcastState();
   }
@@ -664,6 +700,8 @@ class Room {
       choices: this.phase === PHASE.CHOOSING && id === this.drawerId ? this.choices : null,
       result: this.phase === PHASE.TURN_END ? this.lastResult : null,
       ranking: this.phase === PHASE.GAME_OVER ? this.ranking : null,
+      amplify: Boolean(this.amplify) && (this.phase === PHASE.CHOOSING || this.phase === PHASE.DRAWING),
+      amplifySlotsLeft: this.amplify && this.phase === PHASE.DRAWING ? Math.max(0, AMPLIFY_SLOTS - this.guessOrder) : 0,
     };
   }
 
@@ -672,4 +710,4 @@ class Room {
   }
 }
 
-module.exports = { Room, PHASE, UNLIMITED, normalize, isClose, revealsWord, voiceMatches, cleanOp };
+module.exports = { Room, PHASE, UNLIMITED, AMPLIFY_SLOTS, AMPLIFY_MULTIPLIER, normalize, isClose, revealsWord, voiceMatches, cleanOp };
