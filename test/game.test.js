@@ -217,6 +217,47 @@ test('draw time is limited to 30, 45 or 60 seconds', async () => {
   }
 });
 
+test('max players can be unlimited, and a cap still blocks extra players', async () => {
+  const host = client();
+  const { code } = await emit(host, 'room:create', { name: 'Host' });
+  host.emit('room:settings', { maxPlayers: 0 });
+  await waitFor(host, (s) => s.settings.maxPlayers === 0);
+
+  const guests = Array.from({ length: 19 }, () => client());
+  const results = await Promise.all(guests.map((g, i) => emit(g, 'room:join', { name: `G${i}`, code })));
+  assert.ok(results.every((r) => r.ok), 'all 19 guests joined');
+  await waitFor(host, (s) => s.players.length === 20);
+
+  // A small cap: 2 players allowed, a third is turned away.
+  const { code: small } = await emit(guests[0], 'room:create', { name: 'Small' });
+  guests[0].emit('room:settings', { maxPlayers: 2 });
+  await waitFor(guests[0], (s) => s.code === small && s.settings.maxPlayers === 2);
+  assert.equal((await emit(guests[1], 'room:join', { name: 'Two', code: small })).ok, true);
+  const third = await emit(guests[2], 'room:join', { name: 'Three', code: small });
+  assert.equal(third.ok, false);
+  assert.match(third.error, /full/i);
+});
+
+test('custom words are only sent to the host', async () => {
+  const host = client();
+  const guest = client();
+  const { code } = await emit(host, 'room:create', { name: 'Host' });
+  await emit(guest, 'room:join', { name: 'Guest', code });
+  host.emit('room:settings', { customWords: 'secret alpha, secret beta, secret gamma' });
+
+  const hostView = await waitFor(host, (s) => s.settings.customWordCount === 3);
+  assert.deepEqual(hostView.settings.customWords, ['secret alpha', 'secret beta', 'secret gamma']);
+
+  const guestView = await waitFor(guest, (s) => s.settings.customWordCount === 3);
+  assert.deepEqual(guestView.settings.customWords, []);
+  assert.ok(!guest.states.some((s) => JSON.stringify(s).includes('secret')), 'no guest update ever carried a custom word');
+
+  // If the host leaves, the new host takes over the list so they can edit it.
+  host.disconnect();
+  const promoted = await waitFor(guest, (s) => s.hostId === guest.id);
+  assert.equal(promoted.settings.customWords.length, 3);
+});
+
 test('chaos mode is ignored for public rooms', async () => {
   const a = client();
   const r = await emit(a, 'room:create', { name: 'A', isPublic: true, chaos: true });

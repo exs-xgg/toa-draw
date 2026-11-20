@@ -40,7 +40,7 @@ function createServer() {
 
   function findPublicRoom() {
     return [...rooms.values()]
-      .filter((r) => r.isPublic && r.phase !== PHASE.GAME_OVER && r.players.size < r.settings.maxPlayers)
+      .filter((r) => r.isPublic && r.phase !== PHASE.GAME_OVER && !r.isFull())
       .sort((a, b) => b.players.size - a.players.size)[0];
   }
 

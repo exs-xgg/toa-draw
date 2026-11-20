@@ -27,10 +27,6 @@
           <span>Your name</span>
           <input id="name-input" maxlength="20" autocomplete="nickname" placeholder="e.g. Sam">
         </label>
-        <div id="join-invite" class="invite-banner hidden">
-          You've been invited to room <strong id="invite-code"></strong>.
-          <button id="btn-join-invite" class="btn primary">Join room</button>
-        </div>
         <button id="btn-quick" class="btn primary big">Quick play</button>
         <button id="btn-create" class="btn big">Create private room</button>
         <label class="chaos-toggle">
@@ -85,8 +81,12 @@
             <select name="wordCount"></select></label>
           <label class="field"><span>Letter hints</span>
             <select name="hints"></select></label>
-          <label class="field wide"><span>Custom words (comma separated)</span>
+          <label class="field wide" id="custom-words-field"><span>Custom words (comma separated, only you can see them)</span>
             <textarea name="customWords" rows="3" maxlength="6000" placeholder="invoice, balance sheet, coffee break"></textarea></label>
+          <div class="field wide hidden" id="custom-words-hidden">
+            <span>Custom words</span>
+            <p class="hidden-words"></p>
+          </div>
           <label class="check wide"><input type="checkbox" name="customOnly"> Use custom words only</label>
           <label class="check wide" id="chaos-setting"><input type="checkbox" name="chaos"> <strong>Chaos mode</strong>: answers by voice only</label>
           <p id="chaos-note" class="chaos-note wide hidden"></p>
@@ -161,6 +161,22 @@
       <button type="button" id="btn-mic" class="mic hidden" title="Answer by voice (Ctrl+M)" aria-label="Start voice answer" aria-pressed="false">
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0 M12 18v3 M8 21h8"/></svg>
       </button>
+    </form>
+  </div>
+
+  <!-- Invite modal: shown when the page is opened with ?r=CODE -->
+  <div id="invite-modal" class="modal-backdrop hidden">
+    <form id="invite-form" class="card modal" role="dialog" aria-modal="true" aria-labelledby="invite-title" aria-describedby="invite-desc" novalidate>
+      <h2 id="invite-title">You're invited</h2>
+      <p id="invite-desc" class="muted">Join room</p>
+      <div id="invite-code" class="room-code modal-code"></div>
+      <label class="field">
+        <span>Your name</span>
+        <input id="invite-name" maxlength="20" autocomplete="nickname" placeholder="e.g. Sam">
+      </label>
+      <p id="invite-error" class="error" role="alert"></p>
+      <button type="submit" id="btn-join-invite" class="btn primary big">Join room</button>
+      <button type="button" id="btn-invite-dismiss" class="btn ghost big">Not now</button>
     </form>
   </div>
 

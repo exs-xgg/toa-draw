@@ -9,11 +9,12 @@
     '#4b5563', '#78350f', '#a16207', '#b91c1c', '#c2410c', '#ca8a04', '#15803d', '#0e7490', '#1d4ed8', '#6d28d9', '#be185d',
   ];
   const SIZES = [4, 10, 20, 36];
+  const UNLIMITED_PLAYERS = 0;
   const SpeechRecognitionImpl = window.SpeechRecognition || window.webkitSpeechRecognition || null;
   const SETTING_OPTIONS = {
     rounds: [1, 2, 3, 4, 5, 6, 8, 10],
     drawTime: [30, 45, 60],
-    maxPlayers: [2, 3, 4, 5, 6, 8, 10, 12, 16],
+    maxPlayers: [2, 3, 4, 5, 6, 8, 10, 12, 16, 0], // 0 = Unlimited
     wordCount: [1, 2, 3, 4, 5],
     hints: [0, 1, 2, 3, 4, 5],
   };
@@ -82,45 +83,42 @@
   // ---------- home ----------
   const nameInput = $('name-input');
   nameInput.value = store.get('toa-draw-name') || '';
-  const inviteCode = (new URLSearchParams(location.search).get('r') || '').toUpperCase().slice(0, 5);
-  if (inviteCode) {
-    $('invite-code').textContent = inviteCode;
-    $('join-invite').classList.remove('hidden');
-    $('code-input').value = inviteCode;
-  }
+  const inviteCode = (new URLSearchParams(location.search).get('r') || '')
+    .toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5);
 
-  function playerNameInput() {
-    const name = nameInput.value.trim().slice(0, 20);
+  function readName(input, errorEl) {
+    const name = input.value.trim().slice(0, 20);
     if (!name) {
-      $('home-error').textContent = 'Enter a name first.';
-      nameInput.focus();
+      errorEl.textContent = 'Enter a name first.';
+      input.focus();
       return null;
     }
     store.set('toa-draw-name', name);
-    $('home-error').textContent = '';
+    errorEl.textContent = '';
     return name;
   }
 
-  function handleJoinResult(res) {
+  function handleJoinResult(res, errorEl = $('home-error')) {
     if (!res || !res.ok) {
-      $('home-error').textContent = (res && res.error) || 'Could not join the room.';
+      errorEl.textContent = (res && res.error) || 'Could not join the room.';
       lastCode = null;
       return;
     }
+    closeInvite();
     lastCode = res.code;
     history.replaceState(null, '', `/?r=${res.code}`);
   }
 
-  function join(event, payload) {
-    const name = playerNameInput();
+  function join(event, payload, input = nameInput, errorEl = $('home-error')) {
+    const name = readName(input, errorEl);
     if (!name) return;
     lastName = name;
-    socket.emit(event, { name, ...payload }, handleJoinResult);
+    nameInput.value = name;
+    socket.emit(event, { name, ...payload }, (res) => handleJoinResult(res, errorEl));
   }
 
   $('btn-quick').addEventListener('click', () => join('room:quick'));
   $('btn-create').addEventListener('click', () => join('room:create', { isPublic: false, chaos: $('chaos-input').checked }));
-  $('btn-join-invite').addEventListener('click', () => join('room:join', { code: inviteCode }));
   $('join-form').addEventListener('submit', (e) => {
     e.preventDefault();
     const code = $('code-input').value.trim().toUpperCase();
@@ -128,8 +126,53 @@
     join('room:join', { code });
   });
   nameInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); inviteCode ? join('room:join', { code: inviteCode }) : join('room:quick'); }
+    if (e.key === 'Enter') { e.preventDefault(); join('room:quick'); }
   });
+
+  // ---------- invite modal ----------
+  const inviteModal = $('invite-modal');
+  const backgroundRegions = () => [document.querySelector('.brand-bar'), $('screen-home')];
+
+  function openInvite(code) {
+    $('invite-code').textContent = code;
+    $('code-input').value = code;
+    $('invite-error').textContent = '';
+    const input = $('invite-name');
+    input.value = nameInput.value;
+    inviteModal.classList.remove('hidden');
+    document.body.classList.add('modal-open');
+    // Keep keyboard and screen-reader focus inside the dialog.
+    backgroundRegions().forEach((el) => el && el.setAttribute('inert', ''));
+    setTimeout(() => {
+      if (input.value) $('btn-join-invite').focus();
+      else input.focus();
+    }, 0);
+  }
+
+  function closeInvite() {
+    if (inviteModal.classList.contains('hidden')) return;
+    inviteModal.classList.add('hidden');
+    document.body.classList.remove('modal-open');
+    backgroundRegions().forEach((el) => el && el.removeAttribute('inert'));
+  }
+
+  function dismissInvite() {
+    closeInvite();
+    if (!state) history.replaceState(null, '', '/');
+    nameInput.focus();
+  }
+
+  $('invite-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    join('room:join', { code: $('invite-code').textContent }, $('invite-name'), $('invite-error'));
+  });
+  $('btn-invite-dismiss').addEventListener('click', dismissInvite);
+  inviteModal.addEventListener('click', (e) => { if (e.target === inviteModal) dismissInvite(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !inviteModal.classList.contains('hidden')) dismissInvite();
+  });
+
+  if (inviteCode.length === 5) openInvite(inviteCode);
 
   function leave() {
     micOn = false;
@@ -140,7 +183,7 @@
     lastCode = null;
     history.replaceState(null, '', '/');
     $('chat-log').replaceChildren();
-    $('join-invite').classList.add('hidden');
+    closeInvite();
     showScreen('home');
   }
   document.querySelectorAll('.js-leave').forEach((b) => b.addEventListener('click', leave));
@@ -149,7 +192,12 @@
   const form = $('settings-form');
   for (const [key, values] of Object.entries(SETTING_OPTIONS)) {
     const select = form.elements[key];
-    for (const v of values) select.append(el('option', { value: v }, v));
+    for (const v of values) select.append(el('option', { value: v }, optionLabel(key, v)));
+  }
+
+  // maxPlayers 0 means no cap.
+  function optionLabel(key, value) {
+    return key === 'maxPlayers' && Number(value) === UNLIMITED_PLAYERS ? 'Unlimited' : String(value);
   }
 
   function sendSettings() {
@@ -168,7 +216,9 @@
   form.addEventListener('change', sendSettings);
 
   function ensureOption(select, value) {
-    if (![...select.options].some((o) => Number(o.value) === value)) select.append(el('option', { value }, value));
+    if (![...select.options].some((o) => Number(o.value) === value)) {
+      select.append(el('option', { value }, optionLabel(select.name, value)));
+    }
   }
 
   function renderLobby() {
@@ -180,8 +230,15 @@
       if (document.activeElement !== select) select.value = String(s[key]);
       select.disabled = !host;
     }
+    // Non-hosts never receive the custom words, only how many there are.
+    $('custom-words-field').classList.toggle('hidden', !host);
+    $('custom-words-hidden').classList.toggle('hidden', host);
+    const count = s.customWordCount || 0;
+    $('custom-words-hidden').querySelector('.hidden-words').textContent = count
+      ? `The host added ${count} custom word${count === 1 ? '' : 's'}. They stay secret until they come up.`
+      : 'No custom words added.';
     const words = form.elements.customWords;
-    if (document.activeElement !== words) words.value = s.customWords.join(', ');
+    if (host && document.activeElement !== words) words.value = s.customWords.join(', ');
     words.disabled = !host;
     form.elements.customOnly.checked = s.customOnly;
     form.elements.customOnly.disabled = !host;
@@ -195,7 +252,9 @@
       : 'Chaos mode is on: guesses only count when you say them. Your browser will ask for microphone access. Chrome and Edge send speech to their online speech service to turn it into text.';
 
     $('room-code').textContent = state.code;
-    $('lobby-count').textContent = `${state.players.length}/${s.maxPlayers}`;
+    $('lobby-count').textContent = s.maxPlayers === UNLIMITED_PLAYERS
+      ? String(state.players.length)
+      : `${state.players.length}/${s.maxPlayers}`;
     renderPlayers($('lobby-players'), false);
 
     const start = $('btn-start');

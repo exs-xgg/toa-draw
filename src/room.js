@@ -29,6 +29,7 @@ const AVATAR_COLORS = [
 ];
 
 const DRAW_TIMES = [30, 45, 60]; // seconds; the only draw times hosts can pick
+const UNLIMITED = 0; // maxPlayers value meaning "no player cap"
 
 const SETTING_LIMITS = {
   rounds: [1, 10],
@@ -215,6 +216,11 @@ class Room {
     this.timer = setTimeout(fn, ms);
   }
 
+  isFull() {
+    const max = this.settings.maxPlayers;
+    return max !== UNLIMITED && this.players.size >= max;
+  }
+
   isPlaying() {
     return this.phase === PHASE.CHOOSING || this.phase === PHASE.DRAWING || this.phase === PHASE.TURN_END;
   }
@@ -222,7 +228,7 @@ class Room {
   // ---------- membership ----------
 
   addPlayer(socket, name) {
-    if (this.players.size >= this.settings.maxPlayers) {
+    if (this.isFull()) {
       return { ok: false, error: 'That room is full.' };
     }
     const player = {
@@ -301,11 +307,16 @@ class Room {
   updateSettings(byId, input) {
     if (byId !== this.hostId || this.phase !== PHASE.LOBBY || !input || typeof input !== 'object') return;
     const s = this.settings;
+    const wantsUnlimited = 'maxPlayers' in input
+      && (input.maxPlayers === UNLIMITED || String(input.maxPlayers).toLowerCase() === 'unlimited' || Number(input.maxPlayers) === UNLIMITED);
     for (const key of Object.keys(SETTING_LIMITS)) {
+      if (key === 'maxPlayers' && wantsUnlimited) continue;
       if (key in input) s[key] = clampInt(input[key], SETTING_LIMITS[key], s[key]);
     }
     s.drawTime = DRAW_TIMES.reduce((best, t) => (Math.abs(t - s.drawTime) < Math.abs(best - s.drawTime) ? t : best));
-    s.maxPlayers = Math.max(s.maxPlayers, this.players.size);
+    if (wantsUnlimited) s.maxPlayers = UNLIMITED;
+    // A cap can never go below the number of players already in the room.
+    else if (s.maxPlayers !== UNLIMITED) s.maxPlayers = Math.max(s.maxPlayers, this.players.size);
     if ('customWords' in input) {
       const raw = Array.isArray(input.customWords) ? input.customWords.join(',') : String(input.customWords ?? '');
       s.customWords = [...new Set(
@@ -621,6 +632,17 @@ class Room {
 
   // ---------- state ----------
 
+  // Only the host receives the custom word list; everyone else gets a count,
+  // so the words cannot be read from the page or its network traffic.
+  settingsFor(id) {
+    const { customWords, ...rest } = this.settings;
+    return {
+      ...rest,
+      customWords: id === this.hostId ? customWords : [],
+      customWordCount: customWords.length,
+    };
+  }
+
   stateFor(id) {
     const me = this.players.get(id);
     const canSeeWord = this.phase === PHASE.DRAWING && (id === this.drawerId || (me && me.guessed));
@@ -629,7 +651,7 @@ class Room {
       isPublic: this.isPublic,
       you: id,
       hostId: this.hostId,
-      settings: this.settings,
+      settings: this.settingsFor(id),
       phase: this.phase,
       round: this.round,
       drawerId: this.drawerId,
@@ -650,4 +672,4 @@ class Room {
   }
 }
 
-module.exports = { Room, PHASE, normalize, isClose, revealsWord, voiceMatches, cleanOp };
+module.exports = { Room, PHASE, UNLIMITED, normalize, isClose, revealsWord, voiceMatches, cleanOp };
