@@ -193,8 +193,8 @@ body.modal-open { overflow: hidden; }
 .players-panel { padding: 10px; max-height: 100%; overflow-y: auto; }
 .board { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .canvas-wrap { position: relative; border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); border: 1px solid var(--border); background: #fff; }
-canvas { display: block; width: 100%; height: auto; aspect-ratio: 4 / 3; touch-action: none; background: #fff; }
-canvas.can-draw { cursor: crosshair; }
+#canvas { display: block; width: 100%; height: auto; aspect-ratio: 4 / 3; touch-action: none; background: #fff; }
+#canvas.can-draw { cursor: crosshair; }
 .overlay {
   position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 12px; padding: 20px; text-align: center; background: rgba(15, 20, 34, .72); color: #fff;
@@ -388,3 +388,107 @@ canvas.can-draw { cursor: crosshair; }
 .mic-bad { color: var(--danger); background: var(--surface); border-color: var(--danger) !important; }
 .mic-checking { color: var(--chaos); background: var(--surface); }
 .mic-unknown { color: var(--muted); background: var(--surface); }
+
+/* ===================================================================
+   Christmas theme. Active when <html> has .theme-christmas, which the
+   server controls with HOLIDAY_THEME (default 'christmas', 'off' to stop).
+   =================================================================== */
+.xmas-only { display: none !important; }
+
+:root.theme-christmas {
+  --bg: #0b3324;
+  --surface: #fffdf8;
+  --surface-2: #f7f1e6;
+  --border: #e8dcc7;
+  --text: #1d2a23;
+  --muted: #5b6a60;
+  --accent: #c8102e;
+  --accent-ink: #ffffff;
+  --accent-soft: #fbe4e7;
+  --xmas-green: #0f7a3b;
+  --xmas-gold: #d4a017;
+}
+@media (prefers-color-scheme: dark) {
+  :root.theme-christmas {
+    --bg: #06160f;
+    --surface: #132a20;
+    --surface-2: #1a3529;
+    --border: #2a4a3b;
+    --text: #f4efe4;
+    --muted: #a8baae;
+    --accent: #f05252;
+    --accent-ink: #ffffff;
+    --accent-soft: #3d171c;
+    --xmas-green: #4ade80;
+    --xmas-gold: #f5c542;
+  }
+}
+
+/* Evergreen night sky behind everything */
+.theme-christmas body {
+  background:
+    radial-gradient(1100px 520px at 50% -12%, rgba(46, 140, 98, .55), transparent 65%),
+    linear-gradient(180deg, #0e3c2b 0%, #072317 100%) fixed;
+}
+@media (prefers-color-scheme: dark) {
+  .theme-christmas body {
+    background:
+      radial-gradient(1100px 520px at 50% -12%, rgba(30, 90, 64, .5), transparent 65%),
+      linear-gradient(180deg, #071c14 0%, #030c08 100%) fixed;
+  }
+}
+
+/* Snow sits behind the page; content sits above it */
+.snow { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; background: transparent; }
+.theme-christmas .brand-bar,
+.theme-christmas .lights,
+.theme-christmas .screen { position: relative; z-index: 1; }
+
+/* Header on the dark background */
+.theme-christmas .brand > span:not(.logo):not(.holiday-pill) { color: #ffffff; }
+.logo { position: relative; display: inline-flex; }
+.theme-christmas .logo .hat {
+  display: block !important; position: absolute; top: -12px; left: -7px; transform: rotate(-14deg);
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .3));
+}
+.theme-christmas .holiday-pill {
+  display: inline-block !important; font-size: .68rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
+  padding: 3px 8px; border-radius: 999px; background: var(--xmas-gold); color: #2a1d00;
+}
+.theme-christmas .holiday-note {
+  display: block !important; margin: 0 0 4px; font-weight: 600; color: var(--xmas-green);
+}
+
+/* String of twinkling lights */
+.theme-christmas .lights {
+  display: flex !important; justify-content: space-between; max-width: 1400px; height: 20px;
+  margin: -8px auto 10px; padding: 0 22px;
+  background: linear-gradient(#1c3a2c, #1c3a2c) 0 5px / 100% 2px no-repeat;
+}
+.lights i {
+  display: block; width: 9px; height: 13px; margin-top: 6px; border-radius: 50% 50% 45% 45%;
+  background: #ff4d4d; box-shadow: 0 0 8px 2px rgba(255, 77, 77, .65);
+  animation: twinkle 1.6s ease-in-out infinite alternate;
+}
+.lights i::before { content: ""; display: block; width: 5px; height: 3px; margin: -3px auto 0; background: #2c3e34; border-radius: 1px; }
+.lights i:nth-child(4n+2) { background: #ffd84d; box-shadow: 0 0 8px 2px rgba(255, 216, 77, .65); animation-delay: .4s; }
+.lights i:nth-child(4n+3) { background: #4dff88; box-shadow: 0 0 8px 2px rgba(77, 255, 136, .55); animation-delay: .8s; }
+.lights i:nth-child(4n+4) { background: #4dc3ff; box-shadow: 0 0 8px 2px rgba(77, 195, 255, .55); animation-delay: 1.2s; }
+@keyframes twinkle { from { opacity: 1; } to { opacity: .35; box-shadow: none; } }
+
+/* Candy-cane stripe across the top of the main cards */
+.theme-christmas .home-card,
+.theme-christmas .how,
+.theme-christmas .lobby-grid > .card {
+  border: 0;
+  border-top: 7px solid transparent;
+  background:
+    linear-gradient(var(--surface), var(--surface)) padding-box,
+    repeating-linear-gradient(-45deg, #c8102e 0 10px, #ffffff 10px 20px) border-box;
+}
+.theme-christmas .topbar { border-bottom: 3px solid var(--xmas-green); }
+.theme-christmas .home-card h1 { color: var(--accent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .lights i { animation: none; }
+}

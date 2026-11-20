@@ -1,6 +1,10 @@
 'use strict';
 
-const { WORDS } = require('./words');
+const { WORDS, HOLIDAY_WORDS } = require('./words');
+
+// Seasonal theme switch. 'christmas' (default) adds the festive look and puts
+// at least one holiday word in every word choice; 'off' turns both off.
+const THEME = (process.env.HOLIDAY_THEME || 'christmas').toLowerCase() === 'off' ? 'off' : 'christmas';
 
 const PHASE = Object.freeze({
   LOBBY: 'lobby',
@@ -391,10 +395,18 @@ class Room {
 
   pickChoices() {
     const { customWords, customOnly, wordCount } = this.settings;
-    let pool = customOnly && customWords.length >= wordCount ? customWords : [...WORDS, ...customWords];
-    const fresh = pool.filter((w) => !this.usedWords.has(w.toLowerCase()));
-    if (fresh.length >= wordCount) pool = fresh;
-    return shuffle(pool).slice(0, wordCount);
+    const onlyCustom = customOnly && customWords.length >= wordCount;
+    const unused = (list) => list.filter((w) => !this.usedWords.has(w.toLowerCase()));
+    const seasonal = THEME === 'christmas' ? HOLIDAY_WORDS : [];
+    let pool = onlyCustom ? customWords : [...WORDS, ...seasonal, ...customWords];
+    if (unused(pool).length >= wordCount) pool = unused(pool);
+    if (THEME !== 'christmas' || onlyCustom) return shuffle(pool).slice(0, wordCount);
+
+    // Holiday theme: guarantee one festive word in every set of choices.
+    const festive = unused(HOLIDAY_WORDS).length ? unused(HOLIDAY_WORDS) : HOLIDAY_WORDS;
+    const pick = festive[Math.floor(Math.random() * festive.length)];
+    const rest = shuffle(pool.filter((w) => w !== pick)).slice(0, wordCount - 1);
+    return shuffle([pick, ...rest]);
   }
 
   startChoosing(drawerId) {
@@ -721,4 +733,4 @@ class Room {
   }
 }
 
-module.exports = { Room, PHASE, UNLIMITED, AMPLIFY_SLOTS, AMPLIFY_MULTIPLIER, normalize, isClose, revealsWord, voiceMatches, cleanOp };
+module.exports = { Room, PHASE, THEME, UNLIMITED, AMPLIFY_SLOTS, AMPLIFY_MULTIPLIER, normalize, isClose, revealsWord, voiceMatches, cleanOp };

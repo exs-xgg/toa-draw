@@ -40,4 +40,16 @@ spreadsheet, calculator, invoice, receipt, piggy bank, coin, briefcase, stapler,
   .map((w) => w.trim())
   .filter(Boolean);
 
-module.exports = { WORDS: [...new Set(WORDS)] };
+// Seasonal words, used while the Christmas theme is on (see THEME in room.js).
+const HOLIDAY_WORDS = `
+christmas tree, snowflake, gingerbread man, gingerbread house, candy cane, reindeer, sleigh, stocking,
+ornament, mistletoe, wreath, present, elf, santa, snow globe, hot chocolate, fireplace, chimney,
+nutcracker, angel, ice skates, sled, mittens, snowball, icicle, holly, eggnog, christmas lights,
+advent calendar, north pole, polar bear, toy soldier, fruitcake, ugly sweater, christmas card,
+wrapping paper, tinsel, carolers, snow angel, bauble, sleigh bells, snowy village, cookie jar, red nose
+`
+  .split(',')
+  .map((w) => w.trim())
+  .filter(Boolean);
+
+module.exports = { WORDS: [...new Set(WORDS)], HOLIDAY_WORDS: [...new Set(HOLIDAY_WORDS)] };

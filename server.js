@@ -4,7 +4,7 @@ const path = require('path');
 const http = require('http');
 const express = require('express');
 const { Server } = require('socket.io');
-const { Room, PHASE } = require('./src/room');
+const { Room, PHASE, THEME } = require('./src/room');
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
@@ -20,6 +20,10 @@ function createServer() {
   const rooms = new Map();
 
   app.disable('x-powered-by');
+  // Tells the page which seasonal theme to apply (one switch: HOLIDAY_THEME).
+  app.get('/theme-config.js', (_req, res) => {
+    res.type('application/javascript').set('Cache-Control', 'no-cache').send(`window.TOA_THEME=${JSON.stringify(THEME)};`);
+  });
   app.use(express.static(path.join(__dirname, 'public')));
   app.get('/healthz', (_req, res) => res.json({ ok: true, rooms: rooms.size }));
 

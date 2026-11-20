@@ -381,3 +381,22 @@ test('lobby mic check status is shared with the room', async () => {
   await new Promise((r) => setTimeout(r, 150));
   assert.equal(host.states.at(-1).players.find((p) => p.id === guest.id).voice, 'ready', 'unknown values ignored');
 });
+
+test('Christmas theme: every word choice includes a holiday word, and the page is told the theme', async () => {
+  const { Room } = require('../src/room');
+  const { HOLIDAY_WORDS } = require('../src/words');
+  const room = new Room({ to: () => ({ emit: () => {} }) }, 'XMAS1');
+  for (let i = 0; i < 50; i++) {
+    const choices = room.pickChoices();
+    assert.equal(choices.length, 3);
+    assert.equal(new Set(choices).size, 3, 'no duplicates');
+    assert.ok(choices.some((w) => HOLIDAY_WORDS.includes(w)), `holiday word in ${choices}`);
+  }
+  // Custom-words-only rooms are left alone.
+  room.settings.customWords = ['one', 'two', 'three'];
+  room.settings.customOnly = true;
+  assert.ok(room.pickChoices().every((w) => ['one', 'two', 'three'].includes(w)));
+
+  const res = await fetch(`${url}/theme-config.js`);
+  assert.equal(await res.text(), 'window.TOA_THEME="christmas";');
+});

@@ -40,6 +40,16 @@ Requirements and caveats:
 - Chrome and Edge send the audio to their online speech service to turn it into text. Tell players before using it in a work setting.
 - The server trusts the browser's transcript. A determined player could bypass the microphone with developer tools. It is a party game, not an exam.
 
+## Christmas theme
+
+The game ships with a Christmas "Holiday edition" look, switched on by default:
+
+- Red, green and gold palette on an evergreen night background, in light and dark mode
+- Falling snow behind the page (skipped for people who set their device to reduce motion), twinkling lights under the header, a Santa hat on the logo, candy-cane stripes on the main cards
+- 44 holiday words (candy cane, reindeer, gingerbread house...). Every set of word choices includes at least one, unless the room uses custom words only.
+
+One setting controls all of it: the `HOLIDAY_THEME` environment variable. Leave it unset or set it to `christmas` for the theme. Set it to `off` for the plain look and the normal word list. On Render, change it under the service's Environment tab (it is also in `render.yaml`) and redeploy.
+
 ## Run locally
 
 Requires Node.js 20 or later.
