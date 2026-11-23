@@ -102,6 +102,7 @@ function createServer() {
     socket.on('chat', (text) => currentRoom()?.handleChat(socket, text));
     socket.on('chat:voice', (payload) => currentRoom()?.handleVoice(socket, payload));
     socket.on('voice:status', (status) => currentRoom()?.setVoiceStatus(socket.id, status));
+    socket.on('voice:optout', (on) => currentRoom()?.setMicOptOut(socket.id, on));
     socket.on('player:kick', (id) => currentRoom()?.kick(socket.id, id));
     socket.on('disconnect', leaveRoom);
   });

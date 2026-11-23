@@ -463,3 +463,93 @@ test('drawers per round: setting validation and late joiners', () => {
   assert.deepEqual(room.queue, ['late2'], 'everyone: late joiner gets a turn this round');
   room.clearTimers();
 });
+
+test('round counter never goes past the total, including on the final results', () => {
+  const room = drawersRoom(2, 4);
+  room.hostId = 'p0';
+  room.settings.rounds = 4;
+  room.startGame('p0');
+  let maxSeen = 0;
+  for (let step = 0; step < 50 && room.phase !== 'gameOver'; step++) {
+    maxSeen = Math.max(maxSeen, room.stateFor('p0').round);
+    room.clearTimers();
+    room.nextTurn();
+  }
+  room.clearTimers();
+  assert.equal(room.phase, 'gameOver');
+  assert.equal(maxSeen, 4, 'played rounds 1 to 4');
+  assert.equal(room.stateFor('p0').round, 4, 'final results show round 4, not 5');
+});
+
+// ---------- Chaos mode mic opt-out (3s delayed typed answers) ----------
+function optOutRoom({ chaos = true } = {}) {
+  const { Room } = require('../src/room');
+  const sent = new Map(); // player id -> messages sent to that player
+  const io = { to: (id) => ({ emit: (event, payload) => { if (event === 'chat:msg' && sent.has(id)) sent.get(id).push(payload); } }) };
+  const room = new Room(io, 'OPT01');
+  room.settings.chaos = chaos;
+  room.settings.drawTime = 60;
+  const sockets = {};
+  for (const id of ['drawer', 'opt', 'voice', 'other']) {
+    room.players.set(id, { id, name: id, score: 0, color: '#000000', guessed: false, chatTimes: [], voice: 'ready', micOptOut: false });
+    sent.set(id, []);
+    sockets[id] = { id, join() {}, emit: (event, payload) => { if (event === 'chat:msg') sent.get(id).push(payload); } };
+  }
+  room.round = 1;
+  room.queue = ['drawer'];
+  room.nextTurn();
+  room.chooseWord('drawer', 0);
+  return { room, sockets, sent, word: room.word };
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const gainOf = (room, id) => room.turnGains[id] || 0;
+
+test('mic opt-out: typed answer scores as if sent 3s later, and loses guess order', async () => {
+  const a = optOutRoom(); // opted-out player types at t=0
+  const b = optOutRoom(); // control: normal player speaks the answer at t=3s
+  a.room.setMicOptOut('opt', true);
+  assert.equal(a.room.stateFor('drawer').players.find((p) => p.id === 'opt').micOptOut, true, 'visible to others');
+
+  a.room.handleChat(a.sockets.opt, a.word); // typed, t=0
+  await sleep(1000);
+  a.room.handleVoice(a.sockets.voice, { alternatives: [a.word] }); // normal voice player, t=1s
+  await sleep(1500);
+  assert.equal(a.room.players.get('opt').guessed, false, 'not counted yet at t=2.5s');
+  b.room.handleVoice(b.sockets.voice, { alternatives: [] }); // no-op, keeps timing honest
+  await sleep(500);
+  b.room.handleVoice(b.sockets.voice, { alternatives: [b.word] }); // control at t=3s
+  await sleep(200);
+
+  assert.equal(a.room.players.get('opt').guessed, true, 'counted after the 3s hold');
+  assert.equal(a.room.turnBoosted.size, 0);
+  // Voice player answered at 1s, so they are first; the opted-out player is second.
+  assert.ok(gainOf(a.room, 'voice') > gainOf(a.room, 'opt'));
+  // Opted-out answer (sent at 0s, order 2nd) vs control (sent at 3s, order 1st):
+  // remove the order bonus difference (100 for 1st vs 75 for 2nd) and compare time scores.
+  const optTimeScore = gainOf(a.room, 'opt') - 75;
+  const controlTimeScore = gainOf(b.room, 'voice') - 100;
+  assert.ok(Math.abs(optTimeScore - controlTimeScore) <= 3, `opt ${optTimeScore} vs control-at-3s ${controlTimeScore}`);
+  // ...and clearly less than an instant answer would have scored (~400).
+  assert.ok(optTimeScore <= 385, `time score ${optTimeScore} reflects the 3s delay`);
+  a.room.clearTimers(); b.room.clearTimers();
+});
+
+test('mic opt-out: answers landing after the turn ends do not count; ignored outside chaos', async () => {
+  const a = optOutRoom();
+  a.room.setMicOptOut('opt', true);
+  a.room.handleChat(a.sockets.opt, a.word);
+  a.room.endTurn(); // turn ends inside the 3s window
+  a.room.clearTimers();
+  await sleep(3200);
+  assert.equal(gainOf(a.room, 'opt'), 0);
+  assert.equal(a.room.lastResult.gains.find((g) => g.id === 'opt').gain, 0, 'no points for a late answer');
+  assert.ok(a.sent.get('opt').some((m) => /after the turn ended/.test(m.text)), 'player is told why');
+
+  const normal = optOutRoom({ chaos: false });
+  normal.room.setMicOptOut('opt', true);
+  assert.equal(normal.room.players.get('opt').micOptOut, false, 'no opt-out outside chaos mode');
+  normal.room.handleChat(normal.sockets.opt, normal.word);
+  assert.equal(normal.room.players.get('opt').guessed, true, 'normal rooms: typed answers count instantly');
+  normal.room.clearTimers();
+  normal.room.clearPendingAnswers();
+});

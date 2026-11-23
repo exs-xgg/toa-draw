@@ -29,6 +29,10 @@ const DRAWER_POINTS_PER_GUESS = 60;
 // TOA Amplify (chaos mode): after a turn everyone guessed, the first
 // AMPLIFY_SLOTS correct guessers next turn score AMPLIFY_MULTIPLIER x points.
 const VOICE_STATUSES = ['unknown', 'checking', 'ready', 'blocked', 'unsupported'];
+// Chaos mode mic opt-out: players whose mic does not work may type answers,
+// but every answer they submit is held this long before it is judged, so it
+// scores (time bonus, guess order, Amplify slots) as if it arrived this late.
+const OPT_OUT_DELAY_MS = 3000;
 const AMPLIFY_SLOTS = 3;
 const AMPLIFY_MULTIPLIER = 2;
 
@@ -199,6 +203,8 @@ class Room {
     this.turnBoosted = new Set();
     this.guessOrder = 0;
     this.drawCounts = new Map(); // id -> turns drawn this game
+    this.turnId = 0; // increments every turn
+    this.pendingAnswers = new Set(); // timers for delayed (opted-out) answers
     this.turnInRound = 0;
     this.turnsThisRound = 0;
     this.amplify = false; // this turn is a TOA Amplify turn
@@ -257,6 +263,7 @@ class Room {
       guessed: false,
       chatTimes: [],
       voice: 'unknown', // lobby mic check result, see setVoiceStatus
+      micOptOut: false, // chaos mode: types answers with a delay, see setMicOptOut
     };
     this.players.set(socket.id, player);
     socket.join(this.code);
@@ -281,6 +288,7 @@ class Room {
 
     if (this.players.size === 0) {
       this.clearTimers();
+      this.clearPendingAnswers();
       this.onEmpty(this);
       return;
     }
@@ -384,11 +392,12 @@ class Room {
   }
 
   nextRound() {
-    this.round++;
-    if (this.round > this.settings.rounds) {
+    // Check before counting up, so the final screen still reads "Round N of N".
+    if (this.round >= this.settings.rounds) {
       this.gameOver();
       return;
     }
+    this.round++;
     this.queue = this.pickDrawers();
     this.turnsThisRound = this.queue.length;
     this.turnInRound = 0;
@@ -441,6 +450,7 @@ class Room {
   }
 
   startChoosing(drawerId) {
+    this.turnId++; // delayed (opted-out) answers from earlier turns are discarded
     this.phase = PHASE.CHOOSING;
     this.drawerId = drawerId;
     this.drawCounts.set(drawerId, (this.drawCounts.get(drawerId) || 0) + 1);
@@ -560,6 +570,7 @@ class Room {
 
   toLobby() {
     this.clearTimers();
+    this.clearPendingAnswers();
     this.phase = PHASE.LOBBY;
     this.phaseEndsAt = 0;
     this.round = 0;
@@ -610,6 +621,56 @@ class Room {
     this.broadcastState();
   }
 
+  // Chaos mode only: a player whose mic does not work switches to typed
+  // answers, which the server holds for OPT_OUT_DELAY_MS before judging.
+  setMicOptOut(id, on) {
+    const p = this.players.get(id);
+    if (!p || !this.settings.chaos || p.micOptOut === Boolean(on)) return;
+    p.micOptOut = Boolean(on);
+    this.system(p.micOptOut
+      ? `${p.name} switched to typed answers (mic opt-out). Their answers count ${OPT_OUT_DELAY_MS / 1000}s late.`
+      : `${p.name} is back to voice answers.`, 'info');
+    this.broadcastState();
+  }
+
+  // Judges an opted-out player's answer OPT_OUT_DELAY_MS later, as if it had
+  // only just arrived: time bonus, guess order and Amplify slots all use the
+  // later moment. Answers that land after the turn has ended do not count.
+  delayAnswer(socket, p, judge) {
+    const turn = this.turnId;
+    const timer = setTimeout(() => {
+      this.pendingAnswers.delete(timer);
+      const current = this.players.get(p.id);
+      if (!current) return;
+      if (this.turnId !== turn || !this.isActiveGuesser(current)) {
+        if (this.turnId !== turn || this.phase !== PHASE.DRAWING) {
+          socket.emit('chat:msg', { kind: 'danger', text: 'Your answer arrived after the turn ended (mic opt-out delay).' });
+        }
+        return;
+      }
+      judge(current);
+    }, OPT_OUT_DELAY_MS);
+    this.pendingAnswers.add(timer);
+  }
+
+  clearPendingAnswers() {
+    this.pendingAnswers.forEach(clearTimeout);
+    this.pendingAnswers.clear();
+  }
+
+  // Normal typed-guess judging: exact match scores; otherwise the message is
+  // shown, with a private hint if it was one letter off.
+  judgeTypedGuess(p, socket, text, msg) {
+    const guess = normalize(text);
+    const target = normalize(this.word);
+    if (guess === target) {
+      this.correctGuess(p);
+      return;
+    }
+    this.emitAll('chat:msg', msg);
+    if (isClose(guess, target)) socket.emit('chat:msg', { kind: 'info', text: `"${text}" is close!` });
+  }
+
   // Returns the player if they may send a message now, otherwise null.
   allowMessage(socket) {
     const p = this.players.get(socket.id);
@@ -653,8 +714,13 @@ class Room {
         return;
       }
       // Chaos mode: typed messages never count as answers, and typed messages
-      // that contain the answer are not shown to anyone.
+      // that contain the answer are not shown to anyone. Exception: players
+      // who opted out of the mic type their answers, judged 3s late.
       if (this.settings.chaos) {
+        if (p.micOptOut) {
+          this.delayAnswer(socket, p, (current) => this.judgeTypedGuess(current, socket, text, { ...msg, delayed: true }));
+          return;
+        }
         if (revealsWord(text, this.word)) {
           socket.emit('chat:msg', { kind: 'danger', text: 'Chaos mode: typed answers do not count. Say it out loud!' });
           return;
@@ -662,14 +728,7 @@ class Room {
         this.emitAll('chat:msg', msg);
         return;
       }
-      const guess = normalize(text);
-      const target = normalize(this.word);
-      if (guess === target) {
-        this.correctGuess(p);
-        return;
-      }
-      this.emitAll('chat:msg', msg);
-      if (isClose(guess, target)) socket.emit('chat:msg', { kind: 'info', text: `"${text}" is close!` });
+      this.judgeTypedGuess(p, socket, text, msg);
       return;
     }
     this.emitAll('chat:msg', msg);
@@ -683,7 +742,15 @@ class Room {
     if (!p || !this.isActiveGuesser(p) || !payload || !Array.isArray(payload.alternatives)) return;
     const alternatives = payload.alternatives.slice(0, 5).map((a) => cleanText(a, 120)).filter(Boolean);
     if (!alternatives.length || !this.allowMessage(socket)) return;
+    // Opted-out players who still use the mic get the same 3s delay.
+    if (p.micOptOut) {
+      this.delayAnswer(socket, p, (current) => this.judgeVoice(current, socket, alternatives));
+      return;
+    }
+    this.judgeVoice(p, socket, alternatives);
+  }
 
+  judgeVoice(p, socket, alternatives) {
     if (voiceMatches(alternatives, this.word)) {
       this.correctGuess(p);
       return;
@@ -751,6 +818,7 @@ class Room {
       drawerId: this.drawerId,
       players: [...this.players.values()].map((p) => ({
         id: p.id, name: p.name, score: p.score, color: p.color, guessed: p.guessed, voice: p.voice || 'unknown',
+        micOptOut: Boolean(p.micOptOut),
       })),
       hint: this.phase === PHASE.DRAWING ? this.maskedWord() : null,
       word: canSeeWord ? this.word : null,

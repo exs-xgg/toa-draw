@@ -262,6 +262,7 @@
       : `${state.players.length}/${s.maxPlayers}`;
     renderPlayers($('lobby-players'), false);
     renderMicCheck();
+    $('optout-row').classList.add('hidden'); // the lobby uses the mic check panel's toggle
 
     const start = $('btn-start');
     const enough = state.players.length >= 2;
@@ -282,7 +283,8 @@
         + `about ${minutesFor(maxTurns)} min, however many join.${small}`;
     }
 
-    const notReady = s.chaos ? state.players.filter((p) => p.voice !== 'ready') : [];
+    // Opted-out players are ready too: they type, with the 3s delay.
+    const notReady = s.chaos ? state.players.filter((p) => p.voice !== 'ready' && !p.micOptOut) : [];
     let note;
     if (!enough) note = 'Waiting for at least one more player. Share the invite link.';
     else if (state.isPublic && state.timeLeft > 0) note = 'Public room: the game starts automatically in a few seconds.';
@@ -317,7 +319,9 @@
         p.id === state.hostId && el('span', { class: 'badge host' }, 'HOST'),
         isDrawer && el('span', { class: 'badge draw' }, 'DRAWING'),
         p.guessed && el('span', { class: 'badge' }, 'GUESSED'),
-        !ranked && state.settings.chaos && micBadge(p.voice),
+        state.settings.chaos && p.micOptOut
+          && el('span', { class: 'badge mic-typing', title: 'Mic opt-out: types answers, counted 3s late' }, 'TYPING +3s'),
+        !ranked && state.settings.chaos && !p.micOptOut && micBadge(p.voice),
       );
       const kick = isHost() && p.id !== state.you && el('button', {
         class: 'kick', title: `Remove ${p.name}`, 'aria-label': `Remove ${p.name}`,
@@ -337,9 +341,16 @@
 
   // ---------- game ----------
   function renderGame() {
-    $('round-label').textContent = state.round
-      ? `Round ${state.round} of ${state.settings.rounds}${state.turnsThisRound ? ` · Turn ${state.turnInRound} of ${state.turnsThisRound}` : ''}`
-      : '';
+    const totalRounds = state.settings.rounds;
+    if (state.phase === 'gameOver') {
+      $('round-label').textContent = `Final results · ${totalRounds} round${totalRounds === 1 ? '' : 's'}`;
+    } else if (state.round) {
+      const shownRound = Math.min(state.round, totalRounds);
+      const turn = state.turnsThisRound ? ` · Turn ${state.turnInRound} of ${state.turnsThisRound}` : '';
+      $('round-label').textContent = `Round ${shownRound} of ${totalRounds}${turn}`;
+    } else {
+      $('round-label').textContent = '';
+    }
     renderPlayers($('game-players'), true);
     renderWord();
     renderOverlay();
@@ -361,6 +372,8 @@
     $('canvas').parentElement.classList.toggle('amplify', Boolean(state.amplify));
     if (state.phase === 'drawing' && (state.drawerId === state.you || (self && self.guessed))) {
       input.placeholder = 'Chat (anything with the answer stays hidden)...';
+    } else if (chaos && self && self.micOptOut) {
+      input.placeholder = 'Type your answer (counts 3s later)';
     } else if (chaos) {
       input.placeholder = 'Chat (answers by voice)';
     } else {
@@ -548,7 +561,7 @@
   function canSpeak() {
     const self = me();
     return Boolean(state && state.settings.chaos && state.phase === 'drawing'
-      && state.drawerId !== state.you && self && !self.guessed);
+      && state.drawerId !== state.you && self && !self.guessed && !self.micOptOut);
   }
 
   function voiceStatus(text) {
@@ -629,8 +642,20 @@
   function updateVoice() {
     const mic = $('btn-mic');
     const chaos = Boolean(state && state.settings.chaos && state.phase !== 'lobby');
-    mic.classList.toggle('hidden', !chaos);
+    const self = me();
+    const optedOut = Boolean(chaos && self && self.micOptOut);
+    $('optout-row').classList.toggle('hidden', !chaos);
+    syncOptOut();
+    mic.classList.toggle('hidden', !chaos || optedOut);
     if (!chaos) { micOn = false; stopListening(); voiceStatus(''); return; }
+    if (optedOut) {
+      // Mic opt-out: no microphone, typed answers count 3s after sending.
+      micOn = false;
+      stopListening();
+      const guessing = state.phase === 'drawing' && state.drawerId !== state.you && !self.guessed;
+      voiceStatus(guessing ? 'Mic opt-out: type your answer. It counts 3 seconds after you send it.' : '');
+      return;
+    }
 
     const speakable = canSpeak();
     mic.disabled = !speakable || !SpeechRecognitionImpl;
@@ -722,6 +747,7 @@
     $('mic-check-text').textContent = micCheck.text;
     box.dataset.status = micCheck.status;
     $('btn-mic-check').disabled = micCheck.status === 'checking';
+    syncOptOut();
   }
 
   async function runMicCheck() {
@@ -800,6 +826,18 @@
 
   $('btn-mic-check').addEventListener('click', runMicCheck);
 
+  // Mic opt-out toggles (lobby mic check panel and in-game, under the chat).
+  // The server holds the real state; these boxes just mirror it.
+  function syncOptOut() {
+    const self = me();
+    document.querySelectorAll('.js-optout').forEach((box) => {
+      box.checked = Boolean(self && self.micOptOut);
+    });
+  }
+  document.querySelectorAll('.js-optout').forEach((box) => {
+    box.addEventListener('change', () => socket.emit('voice:optout', box.checked));
+  });
+
   // ---------- chat ----------
   function addMessage(m) {
     const log = $('chat-log');
@@ -808,6 +846,7 @@
       ? el('div', { class: `msg msg-${m.kind}` },
         m.kind === 'insider' && el('span', { class: 'tag', title: 'Only players who know the word can see this' }, 'HIDDEN'),
         m.voice && el('span', { class: 'tag voice', title: 'Said out loud' }, 'VOICE'),
+        m.delayed && el('span', { class: 'tag delayed', title: 'Mic opt-out: judged 3 seconds after sending' }, '+3s'),
         el('span', { class: 'who', style: `color:${m.color}` }, `${m.name}:`), m.text)
       : el('div', { class: `msg msg-${m.kind}` }, m.text);
     log.append(node);

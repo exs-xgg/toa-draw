@@ -494,3 +494,13 @@ body.modal-open { overflow: hidden; }
 }
 
 .game-length { margin: -2px 0 2px; font-size: .82rem; color: var(--muted); }
+
+/* Chaos mode mic opt-out */
+.optout-check { margin-top: 10px; align-items: flex-start; font-size: .85rem; cursor: pointer; }
+.optout-check input { margin-top: 3px; }
+.optout-row {
+  display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-size: .8rem; color: var(--muted);
+  border-top: 1px solid var(--border); cursor: pointer;
+}
+.badge.mic-typing { color: var(--warn); background: var(--surface); border-color: var(--warn); }
+.msg .tag.delayed { color: var(--warn); }

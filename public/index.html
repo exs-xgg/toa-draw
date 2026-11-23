@@ -121,6 +121,10 @@
           </div>
           <p id="mic-check-text" class="mic-check-text"></p>
           <button type="button" id="btn-mic-check" class="btn small">Check again</button>
+          <label class="check optout-check">
+            <input type="checkbox" class="js-optout">
+            <span><strong>My mic isn't working</strong>: let me type answers instead. They count 3 seconds after I send them.</span>
+          </label>
         </div>
         <button id="btn-start" class="btn primary big">Start game</button>
         <p id="lobby-note" class="muted center"></p>
@@ -181,6 +185,10 @@
   <div id="chat" class="card chat">
     <div id="chat-log" class="chat-log" aria-live="polite"></div>
     <div id="voice-status" class="voice-status hidden" aria-live="polite"></div>
+    <label id="optout-row" class="optout-row hidden">
+      <input type="checkbox" class="js-optout">
+      <span>My mic isn't working: type answers (+3s delay)</span>
+    </label>
     <form id="chat-form" class="chat-form">
       <input id="chat-input" maxlength="120" autocomplete="off" placeholder="Type your guess here..." aria-label="Chat or guess">
       <button type="button" id="btn-mic" class="mic hidden" title="Answer by voice (Ctrl+M)" aria-label="Start voice answer" aria-pressed="false">
